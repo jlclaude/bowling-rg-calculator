@@ -81,11 +81,7 @@ class LayoutSpec(EngineeringModel):
 
 
 class HoleSpec(EngineeringModel):
-    """Geometry and material information for a cylindrical drilled hole.
-
-    The surface entry is in inches in the ball frame. The unit axis points from
-    that entry into the ball.
-    """
+    """Geometry and material information for a cylindrical drilled hole."""
 
     name: str = Field(min_length=1)
     diameter_in: PositiveFiniteFloat
@@ -116,11 +112,7 @@ class InsertGeometry(EngineeringModel):
 
 
 class InsertSpec(EngineeringModel):
-    """Mass, geometry, centroid position, and orientation of added material.
-
-    Location is in inches in the ball frame. The current engine supports
-    cylindrical geometry with ``diameter`` and ``depth`` dimensions.
-    """
+    """Mass, geometry, position, and orientation of added insert material."""
 
     name: str = Field(min_length=1)
     mass_g: PositiveFiniteFloat

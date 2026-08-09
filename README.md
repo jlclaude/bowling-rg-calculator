@@ -1,8 +1,9 @@
 # Bowling RG Calculator
 
 An engineering application for estimating post-drilling radius-of-gyration and
-differential properties of bowling balls. The current engine composes mass,
-first moments, and inertia tensors for finite cylindrical holes and inserts.
+differential properties of bowling balls. This initial version provides the
+validated data layer only; it intentionally does **not** implement an unverified
+drilling or inertia model.
 
 ## Requirements
 
@@ -36,11 +37,9 @@ streamlit run app.py
 - Positions are Cartesian 3-vectors; direction and orientation vectors must be
   normalized.
 - Static-weight differences are signed values.
-- `InsertGeometry` uses `shape="cylinder"` with `diameter` and `depth` dimensions
-  for calculations currently supported by the engine.
+- `InsertGeometry` stores a shape label and named dimensions without assuming a
+  mass-property formula.
 
-All internal mass-property calculations use kilograms, meters, and kg·m².
-`HoleSpec.surface_entry_position` is the outer entry point and its axis points
-inward; insert locations identify cylinder centroids. PAP and dual-angle layout
-mapping are intentionally not implemented yet, so all positions and directions
-must already be expressed in the ball's principal-axis coordinate frame.
+The coordinate-frame definition, drilling-volume treatment, initial inertia
+reconstruction, and insert composition rules must be documented and verified
+before the placeholder calculation functions are implemented.
