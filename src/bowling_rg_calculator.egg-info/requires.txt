@@ -1,0 +1,10 @@
+numpy
+pydantic
+streamlit
+
+[dev]
+pytest
+pytest-cov
+black
+ruff
+mypy

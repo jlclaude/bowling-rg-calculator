@@ -1,9 +1,10 @@
 # Bowling RG Calculator
 
 An engineering application for estimating post-drilling radius-of-gyration and
-differential properties of bowling balls. This initial version provides the
-validated data layer only; it intentionally does **not** implement an unverified
-drilling or inertia model.
+differential properties of bowling balls. This version provides validated data
+models plus generic, verified rigid-body tensor mathematics. It intentionally
+does **not** convert bowling specifications into tensors or implement drilling,
+layout, PAP, pin, PSA, or manufacturer-specific conventions.
 
 ## Requirements
 
@@ -43,3 +44,11 @@ streamlit run app.py
 The coordinate-frame definition, drilling-volume treatment, initial inertia
 reconstruction, and insert composition rules must be documented and verified
 before the placeholder calculation functions are implemented.
+
+## Generic inertia utilities
+
+`bowling_rg.inertia` operates exclusively in kilograms, meters, and kg·m². It
+provides unit conversions, RG/moment conversion, principal and rotated tensors,
+parallel-axis translation, arbitrarily oriented finite-cylinder centroid
+tensors, and symmetric eigendecomposition. The bowling-specific
+`build_undrilled_inertia_tensor` function remains deliberately unimplemented.

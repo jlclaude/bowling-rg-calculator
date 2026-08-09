@@ -1,0 +1,16 @@
+README.md
+pyproject.toml
+src/bowling_rg/__init__.py
+src/bowling_rg/calculator.py
+src/bowling_rg/drilling.py
+src/bowling_rg/geometry.py
+src/bowling_rg/inertia.py
+src/bowling_rg/models.py
+src/bowling_rg_calculator.egg-info/PKG-INFO
+src/bowling_rg_calculator.egg-info/SOURCES.txt
+src/bowling_rg_calculator.egg-info/dependency_links.txt
+src/bowling_rg_calculator.egg-info/requires.txt
+src/bowling_rg_calculator.egg-info/top_level.txt
+tests/test_calculator.py
+tests/test_drilling.py
+tests/test_inertia.py
