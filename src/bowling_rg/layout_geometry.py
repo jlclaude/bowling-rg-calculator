@@ -1,16 +1,12 @@
-"""Provisional version-1 PAP, PIN, PSA, VAL, and dual-angle geometry.
+"""Spherical PAP, PIN, and PSA marker geometry.
 
 The ball center is the origin and PAP is the local north pole.  Layout distances
-are great-circle surface distances.  These conventions are deliberately
-isolated: they are a consistent spherical model, not yet an industry-verified
-interpretation of every manufacturer's dual-angle layout system.
+are great-circle surface distances.  The supported constraint engine builds a
+spherical triangle from three measured side lengths without treating VAL angle
+as a PAP bearing.  No dual-angle-to-side-length conversion is defined yet.
 
-To close the otherwise underdetermined PAP-PIN-PSA triangle, version 1 assumes
-PIN and PSA are orthogonal principal-axis directions (90 degrees apart on the
-unit sphere).  ``drilling_angle_deg`` is the spherical angle at PIN between the
-PIN->PAP and PIN->PSA arcs.  The handedness-aware local frame selects the
-corresponding mirrored solution.  No finger/thumb placement, spans, or drilling
-pitches are modeled here.
+Legacy provisional dual-angle helpers remain isolated at the end of this module
+for compatibility and must not be used for production calculations.
 """
 
 from __future__ import annotations
@@ -58,6 +54,25 @@ class BowlingFrame:
         object.__setattr__(self, "x_tangent", x_tangent)
         object.__setattr__(self, "y_tangent", y_tangent)
         object.__setattr__(self, "handedness", handedness)
+
+
+@dataclass(frozen=True)
+class LayoutMarkers:
+    """Normalized PAP, PIN, and PSA marker directions from the ball center."""
+
+    pap_unit: FloatArray
+    pin_unit: FloatArray
+    psa_unit: FloatArray
+
+    def __post_init__(self) -> None:
+        pap = _unit_vector3(self.pap_unit, "pap_unit").copy()
+        pin = _unit_vector3(self.pin_unit, "pin_unit").copy()
+        psa = _unit_vector3(self.psa_unit, "psa_unit").copy()
+        for vector in (pap, pin, psa):
+            vector.setflags(write=False)
+        object.__setattr__(self, "pap_unit", pap)
+        object.__setattr__(self, "pin_unit", pin)
+        object.__setattr__(self, "psa_unit", psa)
 
 
 def build_pap_frame(bowler: BowlerSpec) -> BowlingFrame:
@@ -145,13 +160,117 @@ def tangent_bearing_deg(unit_direction: ArrayLike, frame: BowlingFrame) -> float
     return float(bearing % 360.0)
 
 
+def marker_distance_in(a: ArrayLike, b: ArrayLike, ball_radius_m: float) -> float:
+    """Return the minor great-circle distance between two markers, in inches."""
+    unit_a = _unit_vector3(a, "a")
+    unit_b = _unit_vector3(b, "b")
+    radius = _positive_scalar(ball_radius_m, "ball_radius_m")
+    angle = np.arccos(np.clip(np.dot(unit_a, unit_b), -1.0, 1.0))
+    return meters_to_inches(float(radius * angle))
+
+
+def marker_angle_at(vertex: ArrayLike, point_a: ArrayLike, point_b: ArrayLike) -> float:
+    """Return the spherical tangent angle at a marker vertex, in degrees."""
+    return spherical_triangle_angle_at_vertex(point_a, vertex, point_b)
+
+
+def solve_asymmetric_markers_from_constraints(
+    frame: BowlingFrame,
+    pin_to_pap_in: float,
+    psa_to_pap_in: float,
+    pin_to_psa_arc_in: float,
+    ball_radius_m: float,
+    side: str = "preferred",
+) -> LayoutMarkers:
+    """Solve a spherical PAP-PIN-PSA triangle from its three side lengths.
+
+    Spherical SSS determines the triangle up to rotation about PAP and mirror
+    choice.  Version 1 fixes that harmless rotational freedom by placing PIN on
+    local +Y. ``side='preferred'`` places PSA at a positive local bearing;
+    ``side='opposite'`` selects the reflected solution.  Handed frames therefore
+    produce corresponding mirrored global marker directions.
+    """
+    _require_frame(frame)
+    radius = _positive_scalar(ball_radius_m, "ball_radius_m")
+    pin_pap = _side_angle(pin_to_pap_in, radius, "pin_to_pap_in")
+    psa_pap = _side_angle(psa_to_pap_in, radius, "psa_to_pap_in")
+    pin_psa = _side_angle(pin_to_psa_arc_in, radius, "pin_to_psa_arc_in")
+    _validate_spherical_side_lengths(pin_pap, psa_pap, pin_psa)
+    if side not in {"preferred", "opposite"}:
+        raise ValueError("side must be 'preferred' or 'opposite'")
+
+    denominator = np.sin(pin_pap) * np.sin(psa_pap)
+    cosine_pap_angle = (
+        np.cos(pin_psa) - np.cos(pin_pap) * np.cos(psa_pap)
+    ) / denominator
+    if (
+        cosine_pap_angle < -1.0 - _GEOMETRY_ATOL
+        or cosine_pap_angle > 1.0 + _GEOMETRY_ATOL
+    ):
+        raise ValueError("side lengths do not form a spherical triangle")
+    pap_angle = float(np.arccos(np.clip(cosine_pap_angle, -1.0, 1.0)))
+    bearing = np.rad2deg(pap_angle)
+    if side == "opposite":
+        bearing = -bearing
+
+    pin = surface_direction_from_pap(frame, pin_to_pap_in, 0.0, ball_radius_m)
+    psa = surface_direction_from_pap(frame, psa_to_pap_in, bearing, ball_radius_m)
+    markers = LayoutMarkers(frame.pap_unit, pin, psa)
+    validate_marker_constraints(
+        markers,
+        pin_to_pap_in,
+        psa_to_pap_in,
+        pin_to_psa_arc_in,
+        ball_radius_m,
+    )
+    return markers
+
+
+def validate_marker_constraints(
+    markers: LayoutMarkers,
+    pin_to_pap_in: float,
+    psa_to_pap_in: float,
+    pin_to_psa_arc_in: float,
+    ball_radius_m: float,
+) -> tuple[str, ...]:
+    """Verify all three spherical marker distances or raise ValueError."""
+    if not isinstance(markers, LayoutMarkers):
+        raise TypeError("markers must be LayoutMarkers")
+    radius = _positive_scalar(ball_radius_m, "ball_radius_m")
+    requested = (
+        _positive_scalar(pin_to_pap_in, "pin_to_pap_in"),
+        _positive_scalar(psa_to_pap_in, "psa_to_pap_in"),
+        _positive_scalar(pin_to_psa_arc_in, "pin_to_psa_arc_in"),
+    )
+    actual = (
+        marker_distance_in(markers.pin_unit, markers.pap_unit, radius),
+        marker_distance_in(markers.psa_unit, markers.pap_unit, radius),
+        marker_distance_in(markers.pin_unit, markers.psa_unit, radius),
+    )
+    labels = ("PIN-to-PAP", "PSA-to-PAP", "PIN-to-PSA")
+    for label, measured, expected in zip(labels, actual, requested):
+        if not np.isclose(measured, expected, atol=1e-8, rtol=1e-9):
+            raise ValueError(f"{label} marker distance does not match constraint")
+    return ()
+
+
+# ---------------------------------------------------------------------------
+# LEGACY / PROVISIONAL DUAL-ANGLE INTERPRETATION
+#
+# These helpers interpret VAL angle as a PAP bearing and invent an orthogonal
+# PIN-to-PSA closure.  That convention is not industry-verified and is retained
+# only for compatibility.  Production calculations must use explicit marker
+# side constraints instead.
+# ---------------------------------------------------------------------------
+
+
 def dual_angle_pin_direction(
     frame: BowlingFrame,
     pin_to_pap_in: float,
     val_angle_deg: float,
     ball_radius_m: float,
 ) -> FloatArray:
-    """Place PIN using VAL angle as a provisional PAP tangent bearing."""
+    """Legacy only: provisionally treat VAL angle as a PAP tangent bearing."""
     return surface_direction_from_pap(
         frame, pin_to_pap_in, val_angle_deg, ball_radius_m
     )
@@ -184,6 +303,9 @@ def psa_direction_from_dual_angle(
     return _normalize(toward_psa)
 
 
+# End legacy construction helpers.  The spherical helper below is generic.
+
+
 def spherical_triangle_angle_at_vertex(
     a: ArrayLike, b: ArrayLike, c: ArrayLike
 ) -> float:
@@ -204,6 +326,7 @@ def spherical_triangle_angle_at_vertex(
     return float(np.rad2deg(angle))
 
 
+# Legacy validation for the provisional dual-angle construction above.
 def validate_dual_angle_geometry(
     pap: ArrayLike,
     pin: ArrayLike,
@@ -245,6 +368,28 @@ def validate_dual_angle_geometry(
     if not bearing_matches:
         raise ValueError("PIN bearing does not match VAL-angle placement")
     return ()
+
+
+def _side_angle(distance_in: float, radius_m: float, name: str) -> float:
+    distance = _positive_scalar(distance_in, name)
+    angle = inches_to_meters(distance) / radius_m
+    if angle >= np.pi - _GEOMETRY_ATOL:
+        raise ValueError(f"{name} must be shorter than half the sphere circumference")
+    return angle
+
+
+def _validate_spherical_side_lengths(a: float, b: float, c: float) -> None:
+    sides = (a, b, c)
+    if any(side <= _GEOMETRY_ATOL for side in sides):
+        raise ValueError("spherical triangle side lengths must be positive")
+    if not (
+        a + b > c + _GEOMETRY_ATOL
+        and a + c > b + _GEOMETRY_ATOL
+        and b + c > a + _GEOMETRY_ATOL
+    ):
+        raise ValueError("side lengths violate the spherical triangle inequality")
+    if a + b + c >= 2.0 * np.pi - _GEOMETRY_ATOL:
+        raise ValueError("spherical triangle perimeter must be less than 2*pi")
 
 
 def _frame_for_pap(pap: FloatArray, handedness: Handedness) -> BowlingFrame:

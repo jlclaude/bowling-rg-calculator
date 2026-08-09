@@ -4,15 +4,20 @@ import numpy as np
 import pytest
 
 from bowling_rg.layout_geometry import (
+    LayoutMarkers,
     build_pap_frame,
     dual_angle_pin_direction,
+    marker_angle_at,
+    marker_distance_in,
     pap_distance_in,
     psa_direction_from_dual_angle,
     rotate_about_axis,
+    solve_asymmetric_markers_from_constraints,
     spherical_triangle_angle_at_vertex,
     surface_direction_from_pap,
     tangent_bearing_deg,
     validate_dual_angle_geometry,
+    validate_marker_constraints,
 )
 from bowling_rg.models import BowlerSpec
 from bowling_rg.sphere_geometry import ball_radius_m
@@ -153,3 +158,74 @@ def test_layout_geometry_outputs_are_finite() -> None:
     ]
 
     assert all(np.all(np.isfinite(value)) for value in values)
+
+
+def test_spherical_triangle_reconstructed_from_side_lengths() -> None:
+    radius = ball_radius_m(8.585)
+    frame = build_pap_frame(bowler("right"))
+    original_pin = surface_direction_from_pap(frame, 3.25, 0.0, radius)
+    original_psa = surface_direction_from_pap(frame, 4.1, 67.0, radius)
+    pin_psa_distance = marker_distance_in(original_pin, original_psa, radius)
+
+    markers = solve_asymmetric_markers_from_constraints(
+        frame, 3.25, 4.1, pin_psa_distance, radius
+    )
+
+    assert marker_distance_in(
+        markers.pin_unit, markers.pap_unit, radius
+    ) == pytest.approx(3.25)
+    assert marker_distance_in(
+        markers.psa_unit, markers.pap_unit, radius
+    ) == pytest.approx(4.1)
+    assert marker_distance_in(
+        markers.pin_unit, markers.psa_unit, radius
+    ) == pytest.approx(pin_psa_distance)
+    assert (
+        validate_marker_constraints(markers, 3.25, 4.1, pin_psa_distance, radius) == ()
+    )
+
+
+def test_constraint_solutions_mirror_between_handed_frames() -> None:
+    radius = ball_radius_m(8.585)
+    right = solve_asymmetric_markers_from_constraints(
+        build_pap_frame(bowler("right")), 3.0, 4.0, 4.5, radius
+    )
+    left = solve_asymmetric_markers_from_constraints(
+        build_pap_frame(bowler("left")), 3.0, 4.0, 4.5, radius
+    )
+
+    np.testing.assert_allclose(
+        left.pin_unit, [-right.pin_unit[0], -right.pin_unit[1], right.pin_unit[2]]
+    )
+    np.testing.assert_allclose(
+        left.psa_unit, [-right.psa_unit[0], -right.psa_unit[1], right.psa_unit[2]]
+    )
+
+
+@pytest.mark.parametrize(
+    "side_lengths",
+    [
+        (1.0, 1.0, 3.0),
+        (10.0, 10.0, 10.0),
+    ],
+)
+def test_impossible_spherical_triangle_is_rejected(
+    side_lengths: tuple[float, float, float],
+) -> None:
+    radius = ball_radius_m(8.585)
+    frame = build_pap_frame(bowler("right"))
+
+    with pytest.raises(ValueError, match="triangle|circumference|perimeter"):
+        solve_asymmetric_markers_from_constraints(frame, *side_lengths, radius)
+
+
+def test_marker_angle_uses_spherical_tangents() -> None:
+    markers = LayoutMarkers(
+        pap_unit=np.array([0.0, 0.0, 1.0]),
+        pin_unit=np.array([1.0, 0.0, 0.0]),
+        psa_unit=np.array([0.0, 1.0, 0.0]),
+    )
+
+    assert marker_angle_at(
+        markers.pap_unit, markers.pin_unit, markers.psa_unit
+    ) == pytest.approx(90.0)
