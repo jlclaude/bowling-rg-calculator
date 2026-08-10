@@ -3,7 +3,11 @@
 import numpy as np
 import pytest
 
-from bowling_rg.bowling_physics import build_factory_inertia_tensor
+from bowling_rg.bowling_physics import (
+    build_factory_inertia_tensor,
+    factory_principal_moments,
+    factory_principal_rgs,
+)
 from bowling_rg.calibration import (
     MassCalibrationInput,
     actual_removed_material_mass_g,
@@ -15,6 +19,7 @@ from bowling_rg.calibration import (
 )
 from bowling_rg.drilled_ball import HardwareMass
 from bowling_rg.hole_pitch import HolePitch, make_drilled_hole_geometry
+from bowling_rg.inertia import grams_to_kilograms, inches_to_meters
 from bowling_rg.models import BallSpec
 from bowling_rg.sphere_geometry import ball_radius_m
 
@@ -130,6 +135,62 @@ def test_finished_mass_after_calibration_matches_actual_mass() -> None:
     )
     assert result.residual_after_g == pytest.approx(0.0, abs=1e-9)
     assert drilled.finished_mass_kg * 1000 == pytest.approx(calibration.finished_mass_g)
+
+
+def test_measured_undrilled_mass_is_authoritative_for_calibrated_factory() -> None:
+    original_ball = ball()
+    measured_undrilled_mass_g = original_ball.gross_mass_g + 49.7
+    holes = [hole("thumb", np.array([0.0, 0.0, 1.0]))]
+    hardware = [HardwareMass("hardware", 20.0, holes[0].centroid_m)]
+    removed_mass_g = 1300.0 * total_hole_volume_m3(holes) * 1000.0
+    calibration = MassCalibrationInput(
+        undrilled_mass_g=measured_undrilled_mass_g,
+        finished_mass_g=measured_undrilled_mass_g - removed_mass_g + 20.0,
+        installed_hardware_mass_g=20.0,
+    )
+
+    drilled, result = run_mass_calibrated_drilled_ball(
+        original_ball, holes, hardware, calibration
+    )
+
+    assert original_ball.gross_mass_g == pytest.approx(6350.3)
+    assert drilled.factory_mass_kg == pytest.approx(
+        grams_to_kilograms(measured_undrilled_mass_g)
+    )
+    assert result.predicted_finished_mass_after_g == pytest.approx(
+        calibration.finished_mass_g
+    )
+    assert result.residual_after_g == pytest.approx(0.0, abs=1e-9)
+    assert any(
+        item == "measured undrilled mass used for calibrated factory inertia"
+        for item in result.diagnostics
+    )
+
+
+def test_measured_mass_changes_moments_but_not_factory_rg_values() -> None:
+    original_ball = ball()
+    measured_mass_g = original_ball.gross_mass_g + 125.0
+    measured_ball = original_ball.model_copy(update={"gross_mass_g": measured_mass_g})
+
+    assert factory_principal_rgs(measured_ball) == pytest.approx(
+        factory_principal_rgs(original_ball)
+    )
+    assert measured_ball.manufacturer == original_ball.manufacturer
+    assert measured_ball.model == original_ball.model
+    assert measured_ball.nominal_weight_lb == original_ball.nominal_weight_lb
+    assert measured_ball.total_diff == original_ball.total_diff
+    assert measured_ball.intermediate_diff == original_ball.intermediate_diff
+
+    moments = factory_principal_moments(measured_ball)
+    expected = tuple(
+        grams_to_kilograms(measured_mass_g) * inches_to_meters(rg_in) ** 2
+        for rg_in in factory_principal_rgs(original_ball)
+    )
+    assert moments == pytest.approx(expected)
+    original_moments = factory_principal_moments(original_ball)
+    assert np.asarray(moments) / np.asarray(original_moments) == pytest.approx(
+        measured_mass_g / original_ball.gross_mass_g
+    )
 
 
 def test_one_measurement_does_not_create_per_hole_densities() -> None:

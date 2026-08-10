@@ -177,8 +177,11 @@ def run_mass_calibrated_drilled_ball(
     density_model = build_calibrated_density_model(
         holes_list, calibration, plausible_density_range_kg_m3
     )
+    measured_mass_ball_spec = ball_spec.model_copy(
+        update={"gross_mass_g": calibration.undrilled_mass_g}
+    )
     drilled_result = calculate_drilled_ball(
-        ball_spec,
+        measured_mass_ball_spec,
         holes_list,
         density_model,
         hardware_list,
@@ -190,15 +193,7 @@ def run_mass_calibrated_drilled_ball(
     )
     predicted_after = drilled_result.predicted_finished_mass_g
     diagnostics = list(density_model.diagnostics)
-    if not np.isclose(
-        ball_spec.gross_mass_g,
-        calibration.undrilled_mass_g,
-        atol=1e-9,
-        rtol=1e-12,
-    ):
-        diagnostics.append(
-            "BallSpec gross mass differs from measured undrilled calibration mass"
-        )
+    diagnostics.append("measured undrilled mass used for calibrated factory inertia")
     calibration_result = MassCalibrationResult(
         actual_net_mass_loss_g=(
             calibration.undrilled_mass_g - calibration.finished_mass_g
