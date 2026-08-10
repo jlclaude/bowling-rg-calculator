@@ -24,6 +24,8 @@ from bowling_rg.models import BallSpec
 from bowling_rg.sphere_geometry import ball_radius_m
 
 RADIUS_M = ball_radius_m(8.585)
+PIN = np.array([1.0, 0.0, 0.0])
+PSA = np.array([0.0, 1.0, 0.0])
 
 
 def ball() -> BallSpec:
@@ -115,7 +117,12 @@ def test_calibration_does_not_change_factory_tensor() -> None:
     before = build_factory_inertia_tensor(ball()).copy()
 
     run_mass_calibrated_drilled_ball(
-        ball(), holes, [], synthetic_calibration(holes, 1200.0)
+        ball(),
+        holes,
+        [],
+        synthetic_calibration(holes, 1200.0),
+        pin_unit=PIN,
+        psa_unit=PSA,
     )
 
     np.testing.assert_array_equal(build_factory_inertia_tensor(ball()), before)
@@ -127,7 +134,7 @@ def test_finished_mass_after_calibration_matches_actual_mass() -> None:
     calibration = synthetic_calibration(holes, 1300.0, 20.0)
 
     drilled, result = run_mass_calibrated_drilled_ball(
-        ball(), holes, hardware, calibration
+        ball(), holes, hardware, calibration, pin_unit=PIN, psa_unit=PSA
     )
 
     assert result.predicted_finished_mass_after_g == pytest.approx(
@@ -150,7 +157,12 @@ def test_measured_undrilled_mass_is_authoritative_for_calibrated_factory() -> No
     )
 
     drilled, result = run_mass_calibrated_drilled_ball(
-        original_ball, holes, hardware, calibration
+        original_ball,
+        holes,
+        hardware,
+        calibration,
+        pin_unit=PIN,
+        psa_unit=PSA,
     )
 
     assert original_ball.gross_mass_g == pytest.approx(6350.3)
@@ -222,7 +234,9 @@ def test_hardware_total_of_86_grams_is_calibrated_correctly() -> None:
     ]
     calibration = synthetic_calibration(holes, 1250.0, 86.0)
 
-    _, result = run_mass_calibrated_drilled_ball(ball(), holes, hardware, calibration)
+    _, result = run_mass_calibrated_drilled_ball(
+        ball(), holes, hardware, calibration, pin_unit=PIN, psa_unit=PSA
+    )
 
     assert sum(item.mass_g for item in hardware) == pytest.approx(86.0)
     assert result.calibrated_uniform_density_kg_m3 == pytest.approx(1250.0)

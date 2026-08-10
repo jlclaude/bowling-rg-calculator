@@ -11,6 +11,7 @@ from bowling_rg.bowling_physics import (
     factory_principal_properties,
     factory_principal_rgs,
     factory_spec_warnings,
+    oriented_factory_mass_properties,
     published_differentials_from_rgs,
 )
 from bowling_rg.inertia import (
@@ -114,3 +115,45 @@ def test_symmetric_core_nonzero_intermediate_diff_has_advisory() -> None:
     ball = outer_limits_black_hole_14lb(core_type="symmetric")
 
     assert factory_spec_warnings(ball)
+
+
+def test_oriented_factory_tensor_preserves_moments_and_aligns_axes() -> None:
+    ball = outer_limits_black_hole_14lb()
+    pin = np.array([1.0, 0.0, 0.0])
+    psa = np.array([0.0, 0.0, 1.0])
+    properties = oriented_factory_mass_properties(ball, pin, psa)
+    eigenvalues, eigenvectors = np.linalg.eigh(properties.inertia_about_origin_kg_m2)
+
+    np.testing.assert_allclose(eigenvalues, factory_principal_moments(ball))
+    assert abs(np.dot(eigenvectors[:, 0], pin)) == pytest.approx(1)
+    assert abs(np.dot(eigenvectors[:, 2], psa)) == pytest.approx(1)
+    intermediate = eigenvectors[:, 1]
+    assert np.dot(intermediate, pin) == pytest.approx(0, abs=1e-12)
+    assert np.dot(intermediate, psa) == pytest.approx(0, abs=1e-12)
+    expected_rotation = np.column_stack((pin, np.cross(psa, pin), psa))
+    assert np.linalg.det(expected_rotation) == pytest.approx(1)
+
+
+def test_layout_orientation_rotates_axes_without_changing_factory_rgs() -> None:
+    ball = outer_limits_black_hole_14lb()
+    first = oriented_factory_mass_properties(ball, [1, 0, 0], [0, 0, 1])
+    second = oriented_factory_mass_properties(ball, [0, 1, 0], [1, 0, 0])
+
+    np.testing.assert_allclose(
+        np.linalg.eigvalsh(first.inertia_about_origin_kg_m2),
+        np.linalg.eigvalsh(second.inertia_about_origin_kg_m2),
+    )
+    assert not np.allclose(
+        first.inertia_about_origin_kg_m2, second.inertia_about_origin_kg_m2
+    )
+
+
+def test_symmetric_factory_tensor_is_physically_equivalent_under_rotation() -> None:
+    ball = outer_limits_black_hole_14lb(core_type="symmetric", intermediate_diff=0.0)
+    first = oriented_factory_mass_properties(ball, [1, 0, 0], [0, 0, 1])
+    second = oriented_factory_mass_properties(ball, [0, 1, 0], [0, 0, 1])
+
+    np.testing.assert_allclose(
+        np.linalg.eigvalsh(first.inertia_about_origin_kg_m2),
+        np.linalg.eigvalsh(second.inertia_about_origin_kg_m2),
+    )

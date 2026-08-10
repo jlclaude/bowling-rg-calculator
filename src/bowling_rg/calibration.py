@@ -13,8 +13,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from .drilled_ball import (
     DrilledBallResult,
@@ -159,6 +161,8 @@ def run_mass_calibrated_drilled_ball(
     plausible_density_range_kg_m3: tuple[float, float] = (
         DEFAULT_PLAUSIBLE_DENSITY_RANGE_KG_M3
     ),
+    pin_unit: Optional[ArrayLike] = None,  # noqa: UP045 - Python 3.9
+    psa_unit: Optional[ArrayLike] = None,  # noqa: UP045 - Python 3.9
 ) -> tuple[DrilledBallResult, MassCalibrationResult]:
     """Calibrate uniform density, run the ball model, and report residuals."""
     if not isinstance(ball_spec, BallSpec):
@@ -186,6 +190,8 @@ def run_mass_calibrated_drilled_ball(
         density_model,
         hardware_list,
         actual_finished_mass_g=calibration.finished_mass_g,
+        pin_unit=pin_unit,
+        psa_unit=psa_unit,
     )
     volumes = _per_hole_volumes(holes_list)
     predicted_before = (

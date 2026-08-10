@@ -15,7 +15,7 @@ from typing import Literal, Optional
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
-from .bowling_physics import factory_mass_properties
+from .bowling_physics import factory_mass_properties, oriented_factory_mass_properties
 from .hole_pitch import DrilledHoleGeometry
 from .inertia import grams_to_kilograms, meters_to_inches
 from .mass_properties import (
@@ -27,7 +27,7 @@ from .mass_properties import (
     principal_properties_at_com,
     subtract_mass_properties,
 )
-from .models import BallSpec
+from .models import BallSpec, CoreType
 
 FloatArray = NDArray[np.float64]
 
@@ -205,13 +205,24 @@ def calculate_drilled_ball(
     density_model: MaterialDensityModel,
     hardware: Iterable[HardwareMass] = (),
     actual_finished_mass_g: Optional[float] = None,  # noqa: UP045 - Python 3.9
+    pin_unit: Optional[ArrayLike] = None,  # noqa: UP045 - Python 3.9
+    psa_unit: Optional[ArrayLike] = None,  # noqa: UP045 - Python 3.9
 ) -> DrilledBallResult:
     """Run factory -> hole subtraction -> hardware -> finished properties."""
     if not isinstance(ball_spec, BallSpec):
         raise TypeError("ball_spec must be BallSpec")
     holes_list = list(holes)
     hardware_list = list(hardware)
-    factory = factory_mass_properties(ball_spec)
+    if (pin_unit is None) != (psa_unit is None):
+        raise ValueError("pin_unit and psa_unit must be supplied together")
+    if holes_list and ball_spec.core_type == CoreType.ASYMMETRIC and pin_unit is None:
+        raise ValueError(
+            "asymmetric drilled calculations require PIN and PSA orientation"
+        )
+    if pin_unit is not None and psa_unit is not None:
+        factory = oriented_factory_mass_properties(ball_spec, pin_unit, psa_unit)
+    else:
+        factory = factory_mass_properties(ball_spec)
     drilled, hole_masses = remove_holes_from_factory(factory, holes_list, density_model)
     finished = add_hardware_masses(drilled, hardware_list)
     principal = finished_principal_properties(finished)

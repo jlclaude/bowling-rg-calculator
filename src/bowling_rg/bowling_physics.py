@@ -14,13 +14,14 @@ from __future__ import annotations
 from typing import NamedTuple
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 
 from .inertia import (
     grams_to_kilograms,
     inches_to_meters,
     principal_tensor,
     rg_to_moment,
+    rotate_tensor,
 )
 from .mass_properties import MassProperties, mass_properties_from_centroid
 from .models import BallSpec, CoreType
@@ -106,6 +107,40 @@ def factory_mass_properties(ball: BallSpec) -> MassProperties:
     )
 
 
+def oriented_factory_mass_properties(
+    ball: BallSpec,
+    pin_unit: ArrayLike,
+    psa_unit: ArrayLike,
+) -> MassProperties:
+    """Return factory properties oriented in the world PAP/layout frame.
+
+    PIN is the low-RG principal axis and PSA is the high-RG principal axis.
+    ``cross(high, low)`` supplies the intermediate axis so columns ordered as
+    low/intermediate/high form a proper right-handed rotation.
+    """
+    _require_ball_spec(ball)
+    low_axis = _unit_vector(pin_unit, "pin_unit")
+    high_axis = _unit_vector(psa_unit, "psa_unit")
+    if not np.isclose(np.dot(low_axis, high_axis), 0.0, atol=1e-12, rtol=0.0):
+        raise ValueError("pin_unit and psa_unit must be perpendicular")
+    intermediate_axis = _normalize(np.cross(high_axis, low_axis))
+    # Rebuild high from the first two columns to remove roundoff while retaining
+    # the sign selected by the supplied PSA direction.
+    rebuilt_high = _normalize(np.cross(low_axis, intermediate_axis))
+    if np.dot(rebuilt_high, high_axis) < 0:
+        intermediate_axis = -intermediate_axis
+        rebuilt_high = -rebuilt_high
+    rotation = np.column_stack((low_axis, intermediate_axis, rebuilt_high))
+    if not np.isclose(np.linalg.det(rotation), 1.0, atol=1e-12, rtol=0.0):
+        raise ValueError("factory principal-axis rotation must have determinant +1")
+    world_tensor = rotate_tensor(build_factory_inertia_tensor(ball), rotation)
+    return mass_properties_from_centroid(
+        grams_to_kilograms(ball.gross_mass_g),
+        np.zeros(3, dtype=np.float64),
+        world_tensor,
+    )
+
+
 def published_differentials_from_rgs(
     low_rg: float, intermediate_rg: float, high_rg: float
 ) -> tuple[float, float]:
@@ -143,3 +178,20 @@ def _finite_float(value: float, name: str) -> float:
     if not np.isfinite(number):
         raise ValueError(f"{name} must be finite")
     return number
+
+
+def _unit_vector(value: ArrayLike, name: str) -> FloatArray:
+    vector = np.asarray(value, dtype=np.float64)
+    if vector.shape != (3,) or not np.all(np.isfinite(vector)):
+        raise ValueError(f"{name} must be a finite 3D vector")
+    if not np.isclose(np.linalg.norm(vector), 1.0, atol=1e-12, rtol=1e-12):
+        raise ValueError(f"{name} must be normalized")
+    return vector
+
+
+def _normalize(value: ArrayLike) -> FloatArray:
+    vector = np.asarray(value, dtype=np.float64)
+    magnitude = float(np.linalg.norm(vector))
+    if not np.isfinite(magnitude) or magnitude <= 1e-12:
+        raise ValueError("principal axis must be finite and nonzero")
+    return vector / magnitude

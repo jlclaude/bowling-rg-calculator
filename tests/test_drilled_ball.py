@@ -33,6 +33,10 @@ from bowling_rg.sphere_geometry import ball_radius_m
 
 RADIUS_M = ball_radius_m(8.585)
 DENSITY = MaterialDensityModel(1200.0)
+ORIENTATION = {
+    "pin_unit": np.array([1.0, 0.0, 0.0]),
+    "psa_unit": np.array([0.0, 1.0, 0.0]),
+}
 
 
 def ball() -> BallSpec:
@@ -82,7 +86,7 @@ def test_no_holes_or_hardware_recovers_factory_rgs() -> None:
 def test_centered_radial_cylinder_mass_loss_matches_geometry() -> None:
     hole = radial_hole("centered", np.array([0.0, 0.0, 1.0]))
     removed = removed_mass_properties_for_hole(hole, 1200.0)
-    result = calculate_drilled_ball(ball(), [hole], DENSITY)
+    result = calculate_drilled_ball(ball(), [hole], DENSITY, **ORIENTATION)
 
     assert result.removed_mass_kg == pytest.approx(removed.mass_kg)
     assert result.hole_removed_masses["centered"] == pytest.approx(removed.mass_kg)
@@ -90,7 +94,7 @@ def test_centered_radial_cylinder_mass_loss_matches_geometry() -> None:
 
 def test_off_center_hole_moves_com_opposite_removed_material() -> None:
     hole = radial_hole("off-center", np.array([1.0, 0.0, 0.0]), depth=2.0)
-    result = calculate_drilled_ball(ball(), [hole], DENSITY)
+    result = calculate_drilled_ball(ball(), [hole], DENSITY, **ORIENTATION)
 
     assert result.center_of_mass_m[0] < 0
 
@@ -99,7 +103,7 @@ def test_adding_back_removed_cylinder_recovers_factory_properties() -> None:
     factory = factory_mass_properties(ball())
     hole = radial_hole("restore", np.array([1.0, 0.0, 0.0]), depth=2.0)
     removed = removed_mass_properties_for_hole(hole, 1200.0)
-    drilled_result = calculate_drilled_ball(ball(), [hole], DENSITY)
+    drilled_result = calculate_drilled_ball(ball(), [hole], DENSITY, **ORIENTATION)
     # Recreate the remaining properties directly, then add the exact cylinder.
     from bowling_rg.drilled_ball import remove_holes_from_factory
 
@@ -125,7 +129,10 @@ def test_point_mass_hardware_increases_mass_exactly() -> None:
 
 def test_finished_rg_values_and_differentials_are_consistent() -> None:
     result = calculate_drilled_ball(
-        ball(), [radial_hole("hole", np.array([0.0, 0.0, 1.0]))], DENSITY
+        ball(),
+        [radial_hole("hole", np.array([0.0, 0.0, 1.0]))],
+        DENSITY,
+        **ORIENTATION,
     )
 
     assert 0 < result.low_rg_in <= result.intermediate_rg_in <= result.high_rg_in
@@ -141,8 +148,8 @@ def test_hole_order_does_not_affect_result() -> None:
         radial_hole("z", np.array([0.0, 0.0, 1.0]), depth=2.5),
     ]
 
-    forward = calculate_drilled_ball(ball(), holes, DENSITY)
-    reverse = calculate_drilled_ball(ball(), reversed(holes), DENSITY)
+    forward = calculate_drilled_ball(ball(), holes, DENSITY, **ORIENTATION)
+    reverse = calculate_drilled_ball(ball(), reversed(holes), DENSITY, **ORIENTATION)
 
     assert forward.finished_mass_kg == pytest.approx(reverse.finished_mass_kg)
     np.testing.assert_allclose(forward.center_of_mass_m, reverse.center_of_mass_m)
@@ -166,7 +173,14 @@ def test_hardware_order_does_not_affect_result() -> None:
 def test_predicted_mass_accounting_is_exact() -> None:
     hole = radial_hole("hole", np.array([0.0, 0.0, 1.0]))
     hardware = [HardwareMass("insert", 15, hole.centroid_m)]
-    result = calculate_drilled_ball(ball(), [hole], DENSITY, hardware)
+    result = calculate_drilled_ball(
+        ball(),
+        [hole],
+        DENSITY,
+        hardware,
+        pin_unit=ORIENTATION["pin_unit"],
+        psa_unit=ORIENTATION["psa_unit"],
+    )
 
     assert result.finished_mass_kg == pytest.approx(
         result.factory_mass_kg - result.removed_mass_kg + result.added_mass_kg
@@ -252,7 +266,14 @@ def test_current_ball_integration_has_consistent_finite_accounting() -> None:
         HardwareMass("ring insert", 13, holes[2].centroid_m),
     ]
 
-    result = calculate_drilled_ball(ball(), holes, DENSITY, hardware)
+    result = calculate_drilled_ball(
+        ball(),
+        holes,
+        DENSITY,
+        hardware,
+        pin_unit=layout_geometry.pin_unit,
+        psa_unit=layout_geometry.psa_unit,
+    )
 
     assert result.finished_mass_kg > 0
     assert result.added_mass_kg == pytest.approx(0.086)
@@ -263,3 +284,10 @@ def test_current_ball_integration_has_consistent_finite_accounting() -> None:
         result.factory_mass_kg - result.removed_mass_kg + result.added_mass_kg
     )
     assert np.all(np.isfinite(result.center_of_mass_m))
+
+
+def test_asymmetric_holes_require_explicit_factory_orientation() -> None:
+    modeled_hole = radial_hole("hole", np.array([0.0, 0.0, 1.0]))
+
+    with pytest.raises(ValueError, match="PIN and PSA orientation"):
+        calculate_drilled_ball(ball(), [modeled_hole], DENSITY)
